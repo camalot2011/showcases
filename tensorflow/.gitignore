@@ -1,0 +1,6 @@
+.ipynb_checkpoints/
+cifar-10-python.tar.gz
+data/
+lv_test.dill
+lv_train.dill
+my_model/

@@ -1,0 +1,9 @@
+.ipynb_checkpoints/
+__pycache__/
+out5/
+out6/
+out8/
+out9/
+res_10.dill
+spark-stats-data/
+stack_exchange_schema.txt

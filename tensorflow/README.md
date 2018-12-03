@@ -1,0 +1,3 @@
+# Image Classification with TensorFlow
+
+I performed the image classification analysis on the CIFAR-10 data set. The main file is the `image_classification.ipynb`. The models developed have a gradual increase in the prediction power. The final model with the transfer learning can achieve **86% accuracy** on the test set. All the models are based on the tensorflow in the python. I also applied Keras framework in some of the models.

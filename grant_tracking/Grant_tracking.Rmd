@@ -1,0 +1,568 @@
+---
+title: "Health Related Federal Grant Tracking"
+---
+
+The US government invests billions each year into the health research. The "open government" initiative provides more transparency into the governmental activities in the health related sector. Grant application data from NIH, ACF, AHRQ, CDC, HRSA, FDA, and VA are now easily accessible. With that large amount of data, we can now track the trend of the health research according to the amount of grant money. What research topics/areaes get more attractive? How have they been changing over the years? What area in the health sector will likely be the next breakthrough? I will try to explore those questions from the grant application database. 
+
+First of all, the database called NIH ExPORTER is accesible [here](https://exporter.nih.gov/ExPORTER_Catalog.aspx). A total of 7.3 GB data were downloaded. 
+
+```{r dependency, include=FALSE}
+library(NLP);library(openNLP)                            # Natural language processing
+library(stringi)                                         # string tools
+library(tm)                                              # test mining
+library(RWeka);library(RWekajars)
+library(tidyverse)
+library(data.table)
+library(slam)
+library(tidytext)
+library(wordcloud)
+library(qdap)
+library(dendextend)
+```
+
+Each grant application has to include a "Public Health Relevance" (PHR) statement, a plain text explaining the relevance of the proposed reseach to the general audience. It provides the keywords that are interested to the public. This is the section I am going to focus on in the following study.
+
+First of all, I checked the grant proposals from 2016 to see if there was something interesting. The PHR sections of all the funded grant proposals were extracted, cleaned, and tokenized using the TfIdf (Term frequency Inverse document frequency) method to extract the keywords. A wordcloud plot was made to visualize the popular keywords.
+
+```{r import, include=FALSE}
+#Set the working directory to the root of data folder before the following code
+proj <- fread(paste0(getwd(),"/Data/PRJ/",list.files("./Data/PRJ")[32]))
+proj <- proj %>% filter(!is.na(PHR))
+```
+```{r cleaning, include=FALSE}
+text <- proj$PHR
+words_remove <- c("health", "relev", "relevance", "project", "research", "will",
+                  "public", "propos", "instructions", "can", "may", "understand",
+                  "develop", "insight", qdapDictionaries::Top200Words,
+                  stopwords("en"))
+
+cleaning <- function(text,words = words_remove) {
+    text <- stemDocument(text)
+    corpus <- VCorpus(VectorSource(text))
+    corpus <- tm_map(corpus,content_transformer(function(x) iconv(enc2utf8(x),to = "UTF-8", sub="byte")))
+    corpus <- tm_map(corpus,content_transformer(tolower))
+    corpus <- tm_map(corpus,removePunctuation)
+    corpus <- tm_map(corpus, removeNumbers)
+    corpus <- tm_map(corpus,removeWords,words)
+    corpus <- tm_map(corpus,stripWhitespace)
+    return(corpus)
+}
+
+corpus <- cleaning(text,words_remove)
+```
+```{r unigram, include=FALSE}
+#Set the tokenizer for bigram
+tokenizer <- function(x) {
+  NGramTokenizer(x,Weka_control(min=2,max=2))
+}
+#Unigram matrix with 0.99 cleaning
+unigram_tdm <- TermDocumentMatrix(corpus,
+                          control = list(weighting = weightTfIdf))
+unigram_tdm <- removeSparseTerms(unigram_tdm,0.99)
+unigram_m <- as.matrix(unigram_tdm)
+freq_unigram <- sort(rowSums(unigram_m),decreasing = TRUE)
+```
+```{r unigram_plot, echo=FALSE}
+wordcloud(names(freq_unigram),freq_unigram,
+          scale = c(2.8,0.1),
+          max.words = 25, 
+          colors = brewer.pal(3,"Dark2"))
+```
+
+
+From the plot, we can see that "cancer" was a hightly mentioned topic in 2016, which was not that surprising given that cancer is the no.2 killer disease in US. Another trend we can get from this plot was the shift of the research focus into more clinical settings, as demonstrated by "therapeut", "clinic", "treatment", and "drug". This trend was consistent with the call of NIH for more translational research in [2008](https://www.nih.gov/news-events/news-releases/nih-expands-national-consortium-dedicated-transforming-clinical-translational-research).Surprisingly, the results didn't show any "heart" related keywords, given that cardiovascular diseases are the no.1 killer disease in US. Was the missing of "heart" because of the spreadout of the heart-related keywords like "cardiac" and "cardiovascular"? I performed the association analysis and plotted the highly related words with "heart".
+
+```{r heart_asscoc, echo=FALSE}
+heart_assoc <- findAssocs(unigram_tdm,"heart",0.05)
+heart_assoc_df <- list_vect2df(heart_assoc,
+                                col2 = "word",
+                                col3 = "score")
+ggplot(arrange(heart_assoc_df,desc(score))[1:13,],
+       aes(word,score))+
+  geom_bar(stat = "identity",fill = "grey50")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5,size = 16),
+        axis.text.y = element_text(size = 12,face = "bold"))+
+  xlab("")+
+  ggtitle("Words Associate with Heart in 2016")+
+  coord_flip()
+```
+
+
+Indeed, "heart" was associated with "cardiac" and "cardiovascular". In the later analysis, I combined "heart", "cardiac", "cardiovascular" into one category. Furthermore, it appeared that heart failure is the hottest topic in the heart research.
+
+Now, back to the "cancer". Cancer can have many types. What type of cancer research was attractive to scientists in 2016? To answer that question, I performed the same word association analysis as shown by the following plot. 
+
+```{r cancer_assoc, echo=FALSE}
+cancer_assoc <- findAssocs(unigram_tdm,"cancer",0.08)
+cancer_assoc_df <- list_vect2df(cancer_assoc,
+                                col2 = "word",
+                                col3 = "score")
+ggplot(arrange(cancer_assoc_df,desc(score))[1:13,],
+       aes(word,score))+
+  geom_bar(stat = "identity",fill = "blue")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5,size = 16),
+        axis.text.y = element_text(size = 12,face = "bold"))+
+  xlab("")+
+  ggtitle("Words Associate with Cancer in 2016")+
+  coord_flip()
+```
+
+
+It seemed that "breast" cancer was the most attractive area in the cancer research, following by "lung" cancer in 2016. To verify that finding, I did the bigram tokenization and plotted the wordcloud as following.
+
+```{r bigram, include=FALSE}
+bigram_tdm <- TermDocumentMatrix(corpus,
+                          control = list(tokenize= tokenizer,
+                                         weighting = weightTfIdf))
+bigram_tdm <- removeSparseTerms(bigram_tdm,0.99)
+bigram_m <- as.matrix(bigram_tdm)
+freq_bigram <- sort(rowSums(bigram_m),decreasing = TRUE)
+```
+```{r bigram_plot,echo=FALSE}
+wordcloud(names(freq_bigram),freq_bigram,
+                scale = c(2.2,0.1),
+                max.words = 25, 
+                colors = brewer.pal(3,"Dark2"))
+```
+
+
+Right on! "breast cancer" was indeed among the top 10 highly mentioned bigram. From the plot, "stem cell" was identified, which was consistent with the regenerative medicine that we have heard from the traditional media. "alzheimer diseas" identified was the highly invested area in the pharmaceutical companies. Next, I performed the clustering analysis on the bigram to see the relationship among the bigrams. The dendrogram showed some interesting pattern in the bottom left corners: "breast cancer" and "stem cell" were two independent clusters. A zoom-in in the dendrogram as shown by the bottom plot clearly showed that pattern.
+
+```{r bigram_dend, echo=FALSE}
+bigram_dist <- dist(bigram_m,method = "euclidean")
+bigram_hc <- hclust(bigram_dist,method = "complete")
+bigram_hcd <- as.dendrogram(bigram_hc)
+bigram_hcd_colored <- color_branches(bigram_hcd,k=7)
+plot(bigram_hcd_colored,
+     main = "Dendrogram for bigram frequency")
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r bigram_cluster, echo=FALSE }
+cluster_id <- cutree(bigram_hc,k = 7)
+bigram_freq_df <- data.frame(word = rownames(bigram_m),
+                             freq = rowSums(bigram_m),
+                             cluster = cluster_id)
+bigram_freq_df %>%
+    filter(cluster != 1,
+           cluster != 7) %>%
+    arrange(desc(freq)) %>%
+    mutate(cluster = as.factor(cluster))%>%
+    ggplot(aes(word,freq,color = cluster,fill = cluster)) +
+    geom_bar(stat = "identity")+
+    theme_bw()+
+    theme(plot.title = element_text(hjust = 0.5,size = 16),
+          axis.text.y = element_text(size = 12,face = "bold"))+
+    xlab("")+
+    ggtitle("Bigram interesting clusters")+
+    coord_flip()
+```
+
+
+So far, I performed the word analysis and found out that "cancer", particularly "breast cancer", and "stem cell" were the highly mentioned areaes in grant proposals in 2016. Did the amount of grant money allocated follow the same pattern? And how did the allocated money in each area compare to the "heart" research? I summaried the word frequency (blue bars on the left y axis) together with the grant money (red diamonds on the right axis in million dollars). The money and word frequencies were highly correlated. 
+
+
+```{r money_freq, include=FALSE}
+unigram_dtm_df <- as_data_frame(t(unigram_m)) %>%
+                    select(c("cancer","heart","cardiac","cardiovascular")) %>%
+                    mutate(sum = rowSums(.)) %>%
+                    filter(sum > 0) %>%
+                    select(-sum) %>%
+                    rownames_to_column()
+
+bigram_dtm_df <- as_data_frame(t(bigram_m)) %>%
+                    select(c("breast cancer","stem cell")) %>%
+                    mutate(sum = rowSums(.)) %>%
+                    filter(sum > 0) %>%
+                    select(-sum) %>%
+                    rownames_to_column()
+
+cancer_heart_breast_stem <- full_join(unigram_dtm_df,bigram_dtm_df,by = "rowname")
+
+proj_diseases <- proj %>%
+                      rownames_to_column() %>%
+                      inner_join(cancer_heart_breast_stem, by = "rowname") %>%
+                      select(-rowname) %>%
+                      rename(breast_cancer = "breast cancer",
+                             stem_cell = "stem cell") %>%
+                      select(APPLICATION_ID,TOTAL_COST:stem_cell)%>%
+                      mutate_all(funs(replace(.,is.na(.),0))) %>%
+                      mutate(TOTAL = TOTAL_COST+TOTAL_COST_SUB_PROJECT)
+sum_cancer <- proj_diseases %>%
+                  filter(cancer > 0) %>%
+                  summarize(sum = sum(TOTAL))
+sum_heart <- proj_diseases %>%
+                  #combining three terms
+                  filter(heart >0 | cardiac >0 | cardiovascular >0) %>% 
+                  summarize(sum = sum(TOTAL))
+sum_breast <- proj_diseases %>%
+                  filter(breast_cancer > 0) %>%
+                  summarize(sum = sum(TOTAL))
+sum_stem <- proj_diseases %>%
+                  filter(stem_cell >0) %>%
+                  summarize(sum = sum(TOTAL))
+freq_cancer <- sum(select(unigram_dtm_df,cancer))
+freq_heart <- sum(select(unigram_dtm_df,-rowname,-cancer))
+freq_breast <- sum(select(bigram_dtm_df,`breast cancer`))
+freq_stem <- sum(select(bigram_dtm_df,`stem cell`))
+
+grant_sum <- tibble(Word = c("cancer","heart","breast_cancer","stem_cell"),
+                   Freq = c(freq_cancer,freq_heart,freq_breast,freq_stem),
+                   Grant = unlist(c(sum_cancer,sum_heart,sum_breast,sum_stem)))
+```
+```{r money_freq_pot,echo=FALSE}
+ggplot(grant_sum,aes(x=Word))+
+  geom_bar(aes(y = Freq),stat = "identity",fill = "blue")+
+  geom_point(aes(y = Grant/1000000),color = "red",size = 8,pch = 18)+
+  scale_y_continuous(sec.axis = sec_axis(~.,name = "Grant in Million $"))+
+  xlab("")+
+  ggtitle("Word frequency vs grant money in 2016")+
+  theme(plot.title = element_text(hjust = 0.5,size = 16),
+        axis.text.x = element_text(size = 12,face = "bold"),
+        axis.text.y = element_text(color = "blue"),
+        axis.text.y.right = element_text(color = "red"),
+        axis.title.y = element_text(color = "blue",size = 12),
+        axis.title.y.right = element_text(color = "red",size =12))+
+        annotate("text", x = 3,y= 3500,label = "Cor = 0.9729", size  =4)
+```
+
+
+With the exploratory analysis performed above, I checked all the PHR sections for grants from 2014 to 2017. I focused on the keywords "cancer","heart","breast cancer",and "stem cell" to see how they change over those 4 years.
+```{r PHR_years, include=FALSE}
+word_analysis <- function(df,term,keywords,words = words_remove) {
+  text <- df[[term]]
+  corpus <- cleaning(text,words)
+  unigram_tdm <- TermDocumentMatrix(corpus,
+                          control = list(weighting = weightTfIdf))
+  unigram_tdm <- removeSparseTerms(unigram_tdm,0.99)
+  unigram_m <- as.matrix(unigram_tdm)
+  unigram_dtm_df <- as_data_frame(t(unigram_m)) %>%
+                    select(keywords[wc(keywords) == 1]) %>%
+                    mutate(sum = rowSums(.)) %>%
+                    filter(sum > 0) %>%
+                    select(-sum) %>%
+                    rownames_to_column()
+  if (any(wc(keywords)>1)) {
+      bigram_tdm <- TermDocumentMatrix(corpus,
+                              control = list(tokenize= tokenizer,
+                                             weighting = weightTfIdf))
+      bigram_tdm <- removeSparseTerms(bigram_tdm,0.99)
+      bigram_m <- as.matrix(bigram_tdm)
+      bigram_dtm_df <- as_data_frame(t(bigram_m)) %>%
+                        select(keywords[wc(keywords) == 2]) %>%
+                        mutate(sum = rowSums(.)) %>%
+                        filter(sum > 0) %>%
+                        select(-sum) %>%
+                        rownames_to_column()
+      
+      cancer_heart_breast_stem <- full_join(unigram_dtm_df,bigram_dtm_df,by = "rowname") %>%
+                                    mutate_all(funs(replace(.,is.na(.),0)))
+  } else {
+      cancer_heart_breast_stem <- unigram_dtm_df
+    }
+  
+  df <- df %>%
+          rownames_to_column() %>%
+          inner_join(cancer_heart_breast_stem, by = "rowname") %>%
+          select(-rowname)
+  return(df)
+} 
+
+fns <- tail(list.files("./Data/PRJ"),4) 
+fns <- paste0(getwd(),"/Data/PRJ/",fns)
+proj_PHR <- fns %>%
+              map(fread,select = c("APPLICATION_ID","FY","PHR",
+                                   "TOTAL_COST","TOTAL_COST_SUB_PROJECT")) %>%
+              map(mutate,APPLICATION_ID = as.character(APPLICATION_ID),
+                         FY = as.numeric(FY),
+                         TOTAL_COST = as.numeric(TOTAL_COST),
+                         TOTAL_COST_SUB_PROJECT = as.numeric(TOTAL_COST_SUB_PROJECT)) %>%
+              map(filter,nchar(PHR)>0) %>%
+              map(function(x){mutate_all(x,funs(replace(.,is.na(.),0)))}) %>%
+              map(mutate,TOTAL = TOTAL_COST + TOTAL_COST_SUB_PROJECT) %>%
+              map(select,-TOTAL_COST,-TOTAL_COST_SUB_PROJECT) %>%
+              map(word_analysis,term = "PHR",
+                                keywords = c("cancer","heart","cardiac","cardiovascular",
+                                             "breast cancer","stem cell"),
+                                words_remove)
+              
+
+proj_PHR_df <- bind_rows(proj_PHR)%>%
+                select(-APPLICATION_ID,-PHR) %>%
+                mutate_at(vars(cancer:`stem cell`),funs(replace(.,.>0,1))) %>%
+                mutate(heart = as.numeric(heart > 0 | cardiac > 0 | cardiovascular >0)) %>%
+                select(-cardiac,-cardiovascular) %>%
+                mutate_at(vars(cancer:`stem cell`), funs(.*TOTAL)) %>%
+                group_by(FY) %>%
+                summarize_at(vars(cancer:`stem cell`), funs(sum)) %>%
+                gather(Word,Grant,-FY)
+
+```
+```{r PHR_years_plot,echo=FALSE}
+ggplot(proj_PHR_df,aes(factor(FY),Grant/1000000,color = Word,fill = Word)) + geom_bar(stat = "identity",position = "dodge")+ 
+  labs(title = "Grants by keywords from PHR over the years",x = "", y = "Grant in Million $")+
+  theme(plot.title = element_text(hjust = 0.5,size = 16),
+        axis.text.x = element_text(size = 12,face = "bold"))
+```
+
+
+Even though the time span of 4 years was a bit small, the plot still revealed some interesting information about the health research from 2014 to 2017. First, "cancer" research had the steady increase in research funding, which were alway more than double of those allocated to "heart" research. That was why we had a breakthrough in the cellular therapy for the cancer treatment in recent years. Second, "heart" research is losing the attraction as shown by a slowdown in the funding increase. We might need to put more resource into the cardiovascular research given that cardiovasuclar diseases are the no.1 killer worldwise. Third, "stem cell" research continues to attract the federal grant money shown by the steady increase of funding. "stem cell" research has a very promising future. Those information is really handy if one needs to choose the career in the health science. I would had made a different decision if I had those information when I got into the graduate school. 
+
+NIH starts to record the key words of the grant applicaitons since 2008. Those key words are stored in the "Publication Terms". We can now take a look at those entries.
+```{r PT_loading,include=FALSE}
+fns <- tail(list.files("./Data/PRJ"),10)
+fns <- paste0(getwd(),"/Data/PRJ/",fns)
+proj_PT <- fns %>%
+              map(fread,select = c("APPLICATION_ID","FY","PROJECT_TERMS",
+                                   "TOTAL_COST","TOTAL_COST_SUB_PROJECT")) %>%
+              map(mutate,APPLICATION_ID = as.character(APPLICATION_ID),
+                         FY = as.numeric(FY),
+                         TOTAL_COST = as.numeric(TOTAL_COST),
+                         TOTAL_COST_SUB_PROJECT = as.numeric(TOTAL_COST_SUB_PROJECT)) %>%
+              map(filter,nchar(PROJECT_TERMS)>0) %>%
+              map(function(x){mutate_all(x,funs(replace(.,is.na(.),0)))}) %>%
+              map(mutate,TOTAL = TOTAL_COST + TOTAL_COST_SUB_PROJECT) %>%
+              map(select,-TOTAL_COST,-TOTAL_COST_SUB_PROJECT) %>%
+              map(word_analysis,term = "PROJECT_TERMS",
+                                keywords = c("cancer","heart","stem","clinic"),
+                                words_remove)
+              
+
+proj_PT_df <- bind_rows(proj_PT)%>%
+                select(-APPLICATION_ID,-PROJECT_TERMS) %>%
+                mutate_at(vars(cancer:clinic),funs(replace(.,.>0,1))) %>%
+                mutate_at(vars(cancer:clinic),funs(.*TOTAL)) %>%
+                group_by(FY) %>%
+                summarize_at(vars(cancer:clinic), funs(sum)) %>%
+                gather(Word,Grant,-FY)
+```
+```{r PT_years_plot,echo=FALSE}
+ggplot(proj_PT_df,aes(factor(FY),Grant/1000000,color = Word,fill = Word)) + geom_bar(stat = "identity",position = "dodge")+ 
+  labs(title = "Grants by keywords from project terms over the years",x = "", y = "Grant in Million $")+
+  theme(plot.title = element_text(hjust = 0.5,size = 16),
+        axis.text.x = element_text(size = 12,face = "bold"))
+```
+
+
+
+Now this plot looked very interesting. The big jump from 2011 to 2012 might be due to the implementation of the new record system and/or recovery from the 2008 financial crisis. Besides that hump, it appears that "clinic" has a down trend after the NIH announcement for the translational studies. It bounds back quickly after 2011 and surpass the other three key words. Now, the "clinic" has the steepest rise in funding among the four keywords. Consistent with the plot above from the PHR section, "cancer" and "stem" cell both were attractive for funding allocation over the last decade. On the other hand, "heart" research was rather steady.
+
+Now comes to the most interesting part. Let's look at the grant application abstracts. Abstracts will have much more words to dig through. The database contains the grant abstracts ever since 1985. 
+
+```{r ABS_loading,include=FALSE}
+# ABS word analysis
+fns <- list.files("./Data/PRJABS")
+fns <- paste0(getwd(),"/Data/PRJABS/",fns)
+proj_ABS <- fns %>%
+              map(fread,select = c("APPLICATION_ID","ABSTRACT_TEXT")) %>%
+              map(mutate,APPLICATION_ID = as.character(APPLICATION_ID))
+proj_ABS <- proj_ABS %>%
+              map(filter,nchar(ABSTRACT_TEXT)>0) %>%
+              map(word_analysis,term = "ABSTRACT_TEXT",
+                                keywords = c("cancer","heart","clinic"),
+                                words_remove)
+proj_ABS <- proj_ABS %>%
+              map(select,-ABSTRACT_TEXT)
+names(proj_ABS) <-as.character(c(1985:2017))
+proj_ABS_df <- bind_rows(proj_ABS,.id = "FY")
+
+# Project information loading
+fns <- list.files("./Data/PRJ")
+fns <- paste0(getwd(),"/Data/PRJ/",fns)
+proj_info <- fns %>%
+              map(fread,select = c("APPLICATION_ID","FY",
+                                   "TOTAL_COST","TOTAL_COST_SUB_PROJECT")) %>%
+              map(mutate,APPLICATION_ID = as.character(APPLICATION_ID),
+                         FY = as.numeric(FY),
+                         TOTAL_COST = as.numeric(TOTAL_COST),
+                         TOTAL_COST_SUB_PROJECT = as.numeric(TOTAL_COST_SUB_PROJECT)) %>%
+              map(function(x){mutate_all(x,funs(replace(.,is.na(.),0)))}) %>%
+              map(mutate,TOTAL = TOTAL_COST + TOTAL_COST_SUB_PROJECT) %>%
+              map(select,-TOTAL_COST,-TOTAL_COST_SUB_PROJECT) %>%
+              bind_rows()
+
+# Combine the two data frames
+proj_final <- proj_ABS_df %>%
+                mutate(FY = as.numeric(FY)) %>%
+                left_join(proj_info, by = c("FY","APPLICATION_ID")) %>%
+                mutate_all(funs(replace(.,is.na(.),0))) %>%
+                group_by(FY) %>%
+                summarize(freq_cancer = sum(cancer),
+                          gran_cancer = sum(TOTAL*if_else(cancer>0,1,0)),
+                          freq_heart = sum(heart),
+                          gran_heart = sum(TOTAL*if_else(heart>0,1,0)),
+                          freq_clinic = sum(clinic),
+                          gran_clinic = sum(TOTAL*if_else(clinic>0,1,0))) %>%
+                gather(key,value,-FY) %>%
+                separate(key,into = c("measure","word"),seq = "_") %>%
+                spread(measure,value)
+```
+
+```{r echo=FALSE}
+ggplot(proj_final,aes(FY,freq,color = word)) + 
+  geom_point(aes(shape = word,size = 2,color = word))+
+  geom_line()+
+  scale_x_continuous(breaks = seq(1985,2017,4))+
+  labs(title = "Words appear over the years by application abstracts",x = "Year", y = "Frequency")+
+  theme(axis.text.x = element_text(size = 12),
+        plot.title = element_text(hjust = 0.5,size = 16))
+```
+
+
+
+```{r echo=FALSE}
+proj_grant <- proj_final[-(1:15),]
+
+ggplot(proj_grant,aes(FY,gran/1000000,color = word)) + 
+  geom_point(aes(shape = word,size = 2,color = word))+
+  geom_line()+
+  labs(title = "Grants over the years by application abstracts",x = "Year", y = "Grant in Million $")+
+  theme(axis.text.x = element_text(size = 12),
+        plot.title = element_text(hjust = 0.5,size = 16))
+```
+
+
+
+Plot from this analysis reveals other trends. Cancer is always higher than the rest of two. However, "cancer" is in a down trend in recent years. There were a big jump in grant funding in 2009. All the research funding had increasing period in the "Clinton" time. Again, "heart" research is rather steady in all these year, which accounts for the poor drug discorveries in the cardiovascular areas these years. 
+
+
+
+```{r combine_data, eval=FALSE, include=FALSE}
+word_analysis_combine <- function(df,term,words = words_remove) {
+  text <- df[[term]]
+  corpus <- cleaning(text,words)
+  unigram_tdm <- TermDocumentMatrix(corpus,
+                          control = list(weighting = weightTfIdf))
+  unigram_tdm <- removeSparseTerms(unigram_tdm,0.95)
+  unigram_m <- as.matrix(unigram_tdm)
+  unigram_dtm_df <- as_data_frame(t(unigram_m)) %>%
+                    rownames_to_column()
+  df <- df %>%
+          rownames_to_column() %>%
+          inner_join(unigram_dtm_df, by = "rowname") %>%
+          select(-rowname)
+  return(df)
+}
+
+fns <- list.files("./Data/PRJABS")
+fns <- paste0(getwd(),"/Data/PRJABS/",fns)
+proj_ABS <- fns %>%
+              map(fread,select = c("APPLICATION_ID","ABSTRACT_TEXT")) %>%
+              map(mutate,APPLICATION_ID = as.character(APPLICATION_ID)) %>%
+              map(filter,nchar(ABSTRACT_TEXT)>0) %>%
+              map(word_analysis_combine,term = "ABSTRACT_TEXT", words_remove) %>%
+              map(select,-ABSTRACT_TEXT)
+names(proj_ABS) <-as.character(c(1985:2017))
+proj_ABS_df <- bind_rows(proj_ABS,.id = "FY")
+```
+
+```{r eval=FALSE, include=FALSE}
+fns <- list.files("./Data/PRJABS")
+proj_ABS <- list()
+for (i in seq_along(fns)) {
+  temp <- fread(paste0(getwd(),"/Data/PRJABS/",fns[i]))
+  temp <- temp %>% 
+            select(APPLICATION_ID,ABSTRACT_TEXT)
+  proj_ABS[[i]] <- temp
+}
+names(proj_ABS) <-as.character(c(1985:2017))
+```
+```{r cleaning_ABS, eval=FALSE, include=FALSE}
+freq_ABS_total <- list()
+for (i in seq_along(proj_ABS)) {
+    proj_ABS[[i]] <- proj_ABS[[i]] %>% filter(nchar(ABSTRACT_TEXT) != 0)
+    text <- proj_ABS[[i]]$ABSTRACT_TEXT
+    corpus <- cleaning(text,words_remove)
+    tdm <- TermDocumentMatrix(corpus, control = list(weighting = weightTfIdf))
+    tdm <- removeSparseTerms(tdm,0.99)
+    freq <- sort(rowSums(as.matrix(tdm)),decreasing = TRUE)
+    freq_df <- data.frame(word = names(freq),freq = freq)
+    freq_ABS_total[[i]] <- freq_df
+}
+names(freq_ABS_total) <-as.character(c(1985:2017))
+```
+```{r eval=FALSE, include=FALSE}
+word_trend_ABS <- function(word) {
+  word_data <- data.frame()  
+  for (i in seq_along(freq_ABS_total)) {
+      t <- data.frame(word = word, 
+                      freq = freq_ABS_total[[i]]$freq[which(freq_ABS_total[[i]]$word == word)],
+                      year = names(proj_ABS)[i])
+      word_data <- rbind(word_data,t)
+  }
+  return(word_data)
+}
+
+cancer <- word_trend_ABS("cancer")
+clinic <- word_trend_ABS("clinic")
+heart <- word_trend_ABS("heart")
+ABS_plot <- rbind(cancer,clinic,heart)
+```
+```{r eval=FALSE, include=FALSE}
+ggplot(ABS_plot,aes(year,freq,group = word,color = word)) + geom_line()+geom_point(aes(shape = word,size = 2))+theme(axis.text.x = element_text(size = 12))+scale_x_discrete(breaks = seq(1985,2017,4))+
+  labs(title = "Words appear over the years by application abstracts",x = "Year", y = "Frequency")
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+proj_PT <- list()
+for (i in seq_along(fns)) {
+  temp <- fread(paste0(getwd(),"/Data/PRJ/",fns[i]))
+  temp <- temp %>% 
+            select(APPLICATION_ID,FY,PROJECT_TERMS,TOTAL_COST,TOTAL_COST_SUB_PROJECT)
+  temp[which(is.na(TOTAL_COST)),"TOTAL_COST"] <- 0
+  temp[which(is.na(TOTAL_COST_SUB_PROJECT)),"TOTAL_COST_SUB_PROJECT"] <- 0
+  temp <- temp %>% mutate(total = as.numeric(TOTAL_COST+TOTAL_COST_SUB_PROJECT)) %>%
+                select(APPLICATION_ID,FY,PROJECT_TERMS,total)
+  proj_PT[[i]] <- temp
+}
+names(proj_PT) <-as.character(c(2008:2017))
+```
+```{r eval=FALSE, include=FALSE}
+words_remove <- c("research","cell","cells","health","human","disease")
+freq_PT_total <- list()
+for (i in seq_along(proj_PT)) {
+    proj_PT[[i]] <- proj_PT[[i]] %>% filter(nchar(PROJECT_TERMS) != 0)
+    text <- proj_PT[[i]]$PROJECT_TERMS
+    corpus <- cleaning(text,words_remove)
+    dtm <- DocumentTermMatrix(corpus)
+    dtm <- removeSparseTerms(dtm,0.95)
+    freq <- sort(colapply_simple_triplet_matrix(dtm,FUN = sum),decreasing = TRUE)
+    freq<- data.frame(word = attr(freq,"names"),freq = freq)
+    freq_PT_total[[i]] <- freq
+}
+names(freq_PT_total) <-as.character(c(2008:2017))
+```
+```{r eval=FALSE, include=FALSE}
+word_trend_PT <- function(word) {
+  word_data <- data.frame()  
+  for (i in seq_along(freq_PT_total)) {
+      t <- data.frame(word = word, 
+                      freq = freq_PT_total[[i]]$freq[which(freq_PT_total[[i]]$word == word)],
+                      year = names(proj_PT)[i])
+      word_data <- rbind(word_data,t)
+  }
+  return(word_data)
+}
+
+cancer <- word_trend_PT("cancer")
+clinic <- word_trend_PT("clinic")
+heart <- word_trend_PT("heart")
+PT_plot <- rbind(cancer,clinic,heart)
+```
+```{r eval=FALSE, include=FALSE}
+ggplot(PT_plot,aes(year,freq,color = word)) + geom_bar(stat = "identity",position = "dodge",aes(fill = word))+
+  labs(title = "Fig.3 Words appear over the years by project terms",x = "Year", y = "Frequency")
+```

@@ -1,0 +1,200 @@
+---
+title: "stock_v1"
+author: "Zhandi Liao"
+date: "June 30, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Stock_checking function
+
+This script is made to check the US stock market for the past three weeks trades. 
+
+```{r dependency, include=FALSE}
+library(plyr)
+library(quantmod)
+library(BatchGetSymbols)
+library(tidyverse)
+library(xlsx)
+```
+
+## Download the trade info in the past 3 months from Yahoo finance
+
+```{r download, include=FALSE}
+# Getting the symbols for all the stocks
+all_stock_info <- stockSymbols(exchange = c("AMEX","NASDAQ","NYSE"),
+                               sort.by = c("Exchange","Symbol"),quiet = TRUE)
+tickers <- all_stock_info$Symbol
+# Download from Yahoo finance
+start <- Sys.Date() - 365
+end <- Sys.Date()
+trades <- BatchGetSymbols(tickers = tickers,first.date = start, last.date = end, 
+                          thresh.bad.data = 0.25,bench.ticker = "QQQ",do.complete.data = TRUE,
+                          do.cache = TRUE,cache.folder = "~/BGS_Cache")
+```
+
+## Data processing: pick the price between $0.50 and $15.00, calculate the boll bands 
+```{r data_processing, include=FALSE}
+threshold <- 0.5
+
+benchmark <- threshold * dim(trades$df.tickers[which(trades$df.tickers$ticker == "QQQ"),])[1]
+
+trades_processed <- trades$df.tickers %>% 
+                            filter(!is.na(price.close)) %>%
+                            select(ticker,ref.date,price.open:price.close) %>%
+                            mutate(price.typical = (price.high+price.low+price.close)/3) %>%
+                            group_by(ticker) %>% 
+                            mutate(count = n(),
+                                   price.today = tail(price.close,1)) %>% 
+                            filter(count >= benchmark) %>%
+                            filter(price.today > 0.5 & price.today < 15) %>%
+                            select(ticker:price.typical) %>%
+                            do(cbind(.,BBands(.$price.typical)))
+
+trades_processed_week <- trades_processed %>%
+                            mutate(week = cut(ref.date,breaks = "week")) %>%
+                            group_by(ticker,week) %>%
+                            summarise(price.open = mean(price.open),
+                                      price.high = mean(price.high),
+                                      price.low  = mean(price.low),
+                                      price.close= mean(price.close),
+                                      price.typical = mean(price.typical)) %>%
+                            do(cbind(.,BBands(.$price.typical)))
+
+trades_processed_month <- trades_processed %>%
+                            mutate(month = cut(ref.date,breaks = "month")) %>%
+                            group_by(ticker, month) %>% 
+                            summarise(price.open = mean(price.open),
+                                      price.high = mean(price.high),
+                                      price.low  = mean(price.low),
+                                      price.close= mean(price.close),
+                                      price.typical = mean(price.typical))
+
+trades_processed_quarter <- trades_processed %>%
+                            mutate(quarter = cut(ref.date,breaks = "quarter")) %>%
+                            group_by(ticker,quarter) %>% 
+                            summarise(price.open = mean(price.open),
+                                      price.high = mean(price.high),
+                                      price.low  = mean(price.low),
+                                      price.close= mean(price.close),
+                                      price.typical = mean(price.typical))
+```
+
+## Filter only the ones that fluctuate smaller than 5%
+```{r filter_platform}
+price_fluctuation <- 0.05
+reference_end <- Sys.Date()
+ticker_picked <- trades_processed %>%
+                      filter(ref.date <= reference_end) %>%
+                      split(trades_processed$ticker) %>%
+                      lapply(tail,15) %>%
+                      bind_rows() %>%
+                      select(ticker,mavg) %>%
+                      group_by(ticker) %>%
+                      summarise(avg = mean(mavg),
+                                flex = diff(range(mavg))/mean(mavg)) %>%
+                      filter(flex < price_fluctuation)
+
+ticker_picked_week <- trades_processed_week %>%
+                      filter(week <= reference_end) %>%
+                      split(trades_processed_week$ticker) %>%
+                      lapply(tail,3) %>%
+                      bind_rows() %>%
+                      select(ticker,mavg) %>%
+                      group_by(ticker) %>%
+                      summarise(avg = mean(mavg),
+                                flex = diff(range(mavg))/mean(mavg)) %>%
+                      filter(flex < price_fluctuation)
+```
+
+## Get symbols that have price drops before the flat region
+```{r filter_price_drop}
+price_drop_ratio <- 0.3
+time_span <- 100 #in days
+ticker_picked2 <- trades_processed %>%
+                      filter(ref.date <= reference_end) %>%
+                      filter(ticker %in% ticker_picked$ticker) %>%
+                      split(.$ticker) %>%
+                      lapply(tail,time_span) %>%
+                      bind_rows() %>%
+                      select(ticker,ref.date,mavg) %>%
+                      group_by(ticker) %>%
+                      summarise(max = max(mavg),
+                                max_date = ref.date[which.max(mavg)]) %>%
+                      left_join(ticker_picked,by = "ticker") %>%
+                      mutate(drop_ratio = (max-avg)/max) %>%
+                      filter(drop_ratio > price_drop_ratio)
+
+ticker_picked2_week <- trades_processed_week %>%
+                      filter(week <= reference_end) %>%
+                      filter(ticker %in% ticker_picked_week$ticker) %>%
+                      split(.$ticker) %>%
+                      lapply(tail,round(time_span/5)) %>% #convert days to weeks
+                      bind_rows() %>%
+                      select(ticker,week,mavg) %>%
+                      filter(!is.na(mavg)) %>%
+                      group_by(ticker) %>%
+                      summarise(max = max(mavg),
+                                max_date = week[which.max(mavg)]) %>%
+                      left_join(ticker_picked_week,by = "ticker") %>%
+                      mutate(drop_ratio = (max-avg)/max) %>%
+                      filter(drop_ratio > price_drop_ratio)
+```
+
+## Limit the platform length
+```{r filter_platform_length}
+flat_span <- 60 #in days
+ticker_picked3 <- ticker_picked2 %>%
+                      mutate(flat_days = Sys.Date() - max_date) %>%
+                      filter(flat_days < flat_span)
+
+ticker_picked3_week <- ticker_picked2_week %>%
+                      mutate(max_date = as.Date(max_date),
+                             flat_week = floor((Sys.Date() - max_date)/7)) %>%
+                      filter(flat_week < floor(flat_span/7))
+```
+
+## File processing
+```{r file_processing, include=FALSE}
+symbol_picked <- matrix(ticker_picked$ticker,ncol = 10, byrow = TRUE)
+symbol_picked_week <- matrix(ticker_picked_week$ticker,ncol = 10, byrow = TRUE)
+symbol_picked2 <- matrix(ticker_picked2$ticker,ncol = 10, byrow = TRUE)
+symbol_picked2_week <- matrix(ticker_picked2_week$ticker,ncol = 10, byrow = TRUE)
+filename_daily <- paste0("./Stockapp/trades_processed_daily",".csv")
+filename_weekly <- paste0("./Stockapp/trades_processed_weekly",".csv")
+filename_ticker2 <- paste0("./Stock_picked",Sys.Date(),".xlsx")
+filename_ticker2_week <- paste0("./Stock_picked",Sys.Date(),"_week.xlsx")
+write.csv(trades_processed,filename_daily)
+write.csv(trades_processed_week,filename_weekly)
+write.xlsx(symbol_picked2,filename_ticker2)
+write.xlsx(symbol_picked2_week,filename_ticker2_week)
+write.csv(all_stock_info,"./Stockapp/all_stock_info.csv")
+```
+
+## Old scripts
+```{r eval=FALSE, include=FALSE}
+#filter one
+price_fluctuation <- 0.05
+ticker_picked <- c()
+flat_weeks <- 3
+for (t in unique(trades_processed$ticker)) {
+    l <- trades_processed %>% filter(ticker == t)
+    if ((max(tail(l$mavg,5*flat_weeks))< (1+price_fluctuation) * l$mavg[length(l$mavg)-5*flat_weeks]) & (min(tail(l$mavg,5*flat_weeks)) > (1-price_fluctuation) * l$mavg[length(l$mavg)-5*flat_weeks])) {
+          ticker_picked <- c(ticker_picked,t)
+    }
+}
+
+#filter two
+ticker_picked2 <- c()
+for (s in ticker_picked) {
+    l <- trades_processed %>% filter(ticker == s)
+    if ((max(tail(l$price.close,time_span))*(1-price_drop_ratio) >= 
+         l$price.close[length(l$mavg)-5*flat_weeks])) {
+        ticker_picked2 <- c(ticker_picked2,s)
+    }
+}
+```
+
