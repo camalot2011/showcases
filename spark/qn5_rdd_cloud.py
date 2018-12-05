@@ -20,7 +20,11 @@ def main(*args):
             .filter(lambda line: line.startswith('<row'))
             .filter(lambda line: '/>' in line)
             .map(Post.parse))
-    
+    # self join the post table to figure out the accepted answer datetime 
+    # compare that with the question post creation datetime. if the difference
+    # is less than 3 hours, that is the numerator. The total counts of
+    # the accepted answers is the dominator. Aggregate by hous of the day
+    # datetime parsing is handled by datetime library in python
     joined_5 = (rdd_5.map(lambda x: (x.acceptedanswerid,(x.creationdate.year,
                                  x.creationdate.hour,x.creationdate)))
                  .join(rdd_5.map(lambda x: (x.Id,x.creationdate)))

@@ -18,10 +18,16 @@ def get_avg(val):
         return (val[0], val[1]/(val[1]+val[2]))
     
 def bool_to_int(val):
+    '''convert boolean to integer'''
     return 1 if val else 0
 
 def add_two(val1,val2):
+    '''adding for the two values tuples'''
     return (val1[0]+val2[0],val1[1]+val2[1])
+
+# Please refer to the schema text for all the info of all the fields. 
+# datetime parsing is handled by strptime. A furture default datetime is
+# given to any missing entries.
 
 class Vote(object):
     '''Vote class for parsing the posts from
@@ -162,6 +168,7 @@ class Post(object):
         answercount = int(tree.attrib.get('answercount',0)) 
         commentcount = int(tree.attrib.get('commentcount',0))
         favoritecount = int(tree.attrib.get('favoritecount',0))
+        # the following is parsing the text content of the Posts
         paragraph = ''
         if (len(body) > 0) and ('<p' in body) and ('/p>' in body):
             tree_body = html.fromstring(body)

@@ -20,7 +20,7 @@ def main(*args):
     conf.setAppName("Veterans")
     sc = SparkContext(conf=conf)
     sqlContext = SQLContext(sc)
-    
+    # create the user tables with the user creation date info
     users = sc.textFile(input_fn_user)
     df_user = ((users.map(lambda line: line.strip())
             .filter(lambda line: line.startswith('<row'))
@@ -28,7 +28,7 @@ def main(*args):
             .map(User.parse)
             .map(lambda x: (x.Id,x.creationdate))
             .toDF(['userid','usercreationdate'])))
-    
+    # create the post table with the post creation date and other metrics
     posts = sc.textFile(input_fn_post)
     df_post = ((posts.map(lambda line: line.strip())
             .filter(lambda line: line.startswith('<row'))
@@ -38,7 +38,8 @@ def main(*args):
                             x.viewcount,x.answercount,x.favoritecount))
             .toDF(['ownerid','posttypeid','postcreationdate','score',
                    'views','answers','favorite'])))
-    
+    # join the two table and calculate the time difference between
+    # post creation date and the user creation date
     joined_7 = (df_post.join(df_user, df_post.ownerid == df_user.userid,'inner')
                    .withColumn('delta(days)',
                     (F.unix_timestamp('postcreationdate')-
@@ -46,12 +47,16 @@ def main(*args):
                    .withColumn('veterans', 
                      F.when(F.col('delta(days)').between(100,150), 1)
                       .otherwise(0)))
-    
+    # select the veterans and cache the results to make the 
+    # following analysis quicker
     veterans = (joined_7.filter(F.col('veterans') == 1)[['userid']]
                     .distinct())
     
     w = Window.partitionBy('ownerid').orderBy('postdate')
-
+    # create two tables one for veterans, the other for brief users.
+    # the very first question is selected by using the window function
+    # veterans are created by 'leftsemi' join
+    # brief users are created by 'leftanti' join
     vet = (joined_7.selectExpr('ownerid','posttypeid','postcreationdate as postdate',
                            'score','views','answers','favorite')
                .join(veterans, joined_7.ownerid == veterans.userid,'leftsemi')

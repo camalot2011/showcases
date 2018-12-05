@@ -19,7 +19,7 @@ def main(*args):
     conf.setAppName("Word2Vec")
     sc = SparkContext(conf=conf)
     sqlContext = SQLContext(sc)
-    
+    # create the post table contains the tags info as a string
     posts = sc.textFile(input_fn)
     df_post = ((posts.map(lambda line: line.strip())
             .filter(lambda line: line.startswith('<row'))
@@ -27,9 +27,11 @@ def main(*args):
             .map(Post.parse)
             .map(lambda x: (x.owneruserid,x.tags))
             .toDF(['ownerid','tags'])))
+    # parse the tags using the generic functions into a list of words
     df_tags = (df_post.withColumn('input',F.regexp_replace(F.col('tags'),'<',''))
                   .withColumn('input',F.lower(F.col('input')))
                   .withColumn('input',F.split(F.col('input'),'>')))
+    # build the machine learning pipeline
     w2v = Word2Vec(inputCol="input", outputCol="vectors", 
                    vectorSize=100, minCount=10, seed=42)
     model = w2v.fit(df_tags)
