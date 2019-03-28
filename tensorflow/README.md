@@ -1,6 +1,6 @@
 # Image Classification with TensorFlow
 
-I performed the image classification analysis on the CIFAR-10 data set. The main file is the `image_classification.ipynb`. The models developed have a gradual increase in the prediction power. The final model with the transfer learning can achieve **86% accuracy** on the test set. All the models are based on the tensorflow in the python. I also applied Keras framework in some of the models.
+I performed the image classification analysis on the CIFAR-10 data set. The main file is the `image_classification.ipynb`. The models developed have a gradual increase in the prediction power. The final model with the transfer learning can achieve **86% accuracy** on the test set. All the models are based on the tensorflow in the python. I also applied Keras framework in some of the models. The notebook can be viewed [HERE](https://nbviewer.jupyter.org/github/camalot2011/showcases/blob/master/tensorflow/image_classification.ipynb).
 
 Some key findings are:
 - Smallest delta model: using the perceptual formula to calculate the distance. The overall accuracy is poor for this model at only **25.13%**
