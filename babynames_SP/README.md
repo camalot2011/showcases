@@ -1,6 +1,6 @@
 # Baby Names Analysis with Spark and SQL
 
-Baby names were downloaded from social security website and analyzed with the Spark / SQL plus time series analysis inside the python notebook `babynames.ipynb`.
+Baby names were downloaded from social security website and analyzed with the Spark / SQL plus time series analysis inside the python notebook `babynames.ipynb`. The notebook can be viewed [HERE](https://nbviewer.jupyter.org/github/camalot2011/showcases/blob/master/babynames_SP/babynames.ipynb).
 
 Some key findings:
 - Baby dataset contains 51 comma separated text file corresponding to each states. No missing data or capital letter mishandling are found.
