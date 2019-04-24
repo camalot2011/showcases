@@ -6,7 +6,7 @@ There are also one utility scripts `myutils.py` and three python scripts. Those 
 
 Some key findings are:
 - the ratio of upvote increases with the favorite counts
-- The average answer ration for high reputation users (99 highest) is **0.92776** while that is **0.19994**
+- The average answer ratio for high reputation users (99 highest) is **0.92776** vs **0.19994** (on average)
 - Users with higher reputation make more posts regardless of answers or questions
 - Questions asked between 10:00 and 20:00 have higher ratio of getting answered within 3 hours
 - Veterans have much bettern first question metrics than the ones from the brief users
